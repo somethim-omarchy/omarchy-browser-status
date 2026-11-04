@@ -37,6 +37,7 @@ PAGE_KB = os.sysconf("SC_PAGE_SIZE") // 1024
 # how the keeper is recognised.
 KEEPER_URL = "data:text/html,<title>Browser Keeper</title>"
 KEEPER_CLASS_MARK = "Browser_Keeper"
+KEEPER_TITLE = "Browser Keeper"
 KEEPER_WORKSPACE = "special:browser-keeper"
 
 SHARED_BIN_DIRS = {"/usr/bin", "/bin", "/usr/local/bin", "/usr/sbin", "/sbin"}
@@ -96,7 +97,10 @@ def data_dirs():
 
 
 def default_desktop_id():
-    for command in (["xdg-settings", "get", "default-web-browser"], ["xdg-mime", "query", "default", "x-scheme-handler/https"]):
+    # omarchy-cmd-default-browser resolves the browser the way the launchers do.
+    # xdg-settings can return Omarchy's own wrapper entry (omarchy-browser.desktop),
+    # which would hide the real browser process from this widget.
+    for command in (["omarchy-cmd-default-browser"], ["xdg-settings", "get", "default-web-browser"], ["xdg-mime", "query", "default", "x-scheme-handler/https"]):
         try:
             result = subprocess.run(command, capture_output=True, text=True, timeout=3)
         except (OSError, subprocess.TimeoutExpired):
@@ -344,6 +348,13 @@ def hypr_clients():
         return None
 
 
+def is_keeper(client):
+    """A keeper is recognised by its window class or its page title (Brave's class
+    for an app window can differ from Chromium's, so the title is checked too)."""
+    return (KEEPER_CLASS_MARK in str(client.get("initialClass", ""))
+            or client.get("initialTitle") == KEEPER_TITLE)
+
+
 def windows(pid):
     """Windows owned by the main browser process, or None if Hyprland is unreachable."""
     clients = hypr_clients()
@@ -355,7 +366,7 @@ def windows(pid):
             "class": client.get("class", ""),
             "address": client.get("address", ""),
             "workspace": client.get("workspace", {}).get("name", ""),
-            "keeper": KEEPER_CLASS_MARK in str(client.get("initialClass", "")),
+            "keeper": is_keeper(client),
         }
         for client in clients
         if pid is not None and client.get("pid") == pid
@@ -485,7 +496,7 @@ def retire_other_keepers(info):
     main = main_pid(browser_processes(info))
     retired = set()
     for client in hypr_clients() or []:
-        if KEEPER_CLASS_MARK in str(client.get("initialClass", "")) and client.get("pid") != main:
+        if is_keeper(client) and client.get("pid") != main:
             subprocess.run(["hyprctl", "dispatch", f"hl.dsp.window.close({{ window = 'address:{client.get('address')}' }})"],
                            capture_output=True, timeout=3)
             retired.add(client.get("pid"))
